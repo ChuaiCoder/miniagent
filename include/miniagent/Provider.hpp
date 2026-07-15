@@ -6,14 +6,14 @@
 
 namespace miniagent {
 
-struct Message {
-    std::string role;      // "system" | "user" | "assistant" | "tool"
-    std::string content;
-};
-
 struct ChatRequest {
     std::string model;
     std::vector<Message> messages;
+};
+
+struct Message {
+    std::string role;      // "system" | "user" | "assistant" | "tool"
+    std::string content;
 };
 
 struct ChatResponse {

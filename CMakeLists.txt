@@ -69,18 +69,27 @@ target_include_directories(miniagent PRIVATE include)
 target_link_libraries(miniagent PRIVATE nlohmann_json::nlohmann_json httplib::httplib)
 
 # ============================================================================
-# HTTPS 支持：调用 LLM API（如 OpenAI/Claude）必须走 HTTPS，需要 TLS 库
-# 策略：优先使用系统已安装的 OpenSSL；若未找到，则回退到 Windows 原生 schannel
+# HTTPS 支持：调用 LLM API 必须走 HTTPS，需要 TLS 库
+# 策略：优先用系统 OpenSSL；找不到就用项目自带的 third_party/openssl（MSVC 静态库）
 # ----------------------------------------------------------------------------
-# find_package(OpenSSL QUIET)：静默查找系统 OpenSSL，未找到也不报错
 find_package(OpenSSL QUIET)
 
-# 若找到 OpenSSL，则启用 cpp-httplib 的 OpenSSL 支持并链接相关库
 if(OpenSSL_FOUND)
-    # 定义宏 CPPHTTPLIB_OPENSSL_SUPPORT，让 cpp-httplib 在编译时启用 HTTPS 支持
+    # 系统装了 OpenSSL：直接用
     target_compile_definitions(miniagent PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)
-    # 链接 OpenSSL 的 SSL 与 Crypto 两个组件，提供 TLS 握手与加密原语
     target_link_libraries(miniagent PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+    message(STATUS "[miniagent] 使用系统 OpenSSL")
+elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/openssl/lib/libssl.lib")
+    # 系统没有：用项目自带的（放在 third_party/openssl 下的 MSVC 静态库）
+    set(OSSL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/openssl")
+    target_compile_definitions(miniagent PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)
+    target_include_directories(miniagent PRIVATE "${OSSL_DIR}/include")
+    target_link_libraries(miniagent PRIVATE
+        "${OSSL_DIR}/lib/libssl.lib"
+        "${OSSL_DIR}/lib/libcrypto.lib")
+    message(STATUS "[miniagent] 使用项目自带 OpenSSL: ${OSSL_DIR}")
+else()
+    message(WARNING "[miniagent] 未找到 OpenSSL，HTTPS 将不可用")
 endif()
 
 # ============================================================================

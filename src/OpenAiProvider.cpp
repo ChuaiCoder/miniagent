@@ -17,63 +17,44 @@ OpenAiProvider::OpenAiProvider(std::string baseUrl, std::string apiKey)
 
 ChatResponse OpenAiProvider::chat(const ChatRequest &req)
 {
-    // ======================================================================
-    // 空格 1：把 req 拼成 OpenAI 格式的 JSON 请求体
-    // 目标形状：{ "model": "deepseek-chat",
-    //            "messages": [ {"role":"user","content":"你好"}, ... ] }
-    //
-    // 提示：
-    //   body["model"] = ...;
-    //   body["messages"] = json::array();
-    //   然后 for 循环遍历 req.messages：
-    //       for (const auto &m : req.messages) { ... }
-    //   循环体里造一个 json 对象，塞 role 和 content 两个键，
-    //   再 body["messages"].push_back(它);
-    // ======================================================================
-    json body;
-    // TODO(你来写)：大约 6 行
-    body["model"] = ChatRequest.model;
+    // ================== 空格 1：拼请求 JSON ==================
+    // 目标形状：{ "model":"deepseek-chat",
+    //            "messages":[ {"role":"user","content":"你好"} ] }
+    json body;                              // 造一个空的 json 对象，像空盒子
+    body["model"] = req.model;              // 往盒子里放 model 字段，值用传进来的 req.model
+    body["messages"] = json::array();       // messages 是个数组，先放一个空数组 []
+    for (const auto &m : req.messages) {    // 遍历 req 里的每一条消息 m
+        json jm;                            // 每条消息也造一个小盒子
+        jm["role"] = m.role;               // 放 role（"user"/"assistant"...）
+        jm["content"] = m.content;         // 放 content（消息正文）
+        body["messages"].push_back(jm);    // 把小盒子塞进 messages 数组末尾
+    }
 
+    // ================== 空格 2：发 HTTP 请求 ==================
+    httplib::Client cli(baseUrl);           // 创建一个 HTTP 客户端，指向 baseUrl
+    cli.set_read_timeout(120);              // LLM 慢，最多等 120 秒再判定超时
+    httplib::Headers headers = {            // 请求头（HTTP 的"信封上的备注"）
+        {"Authorization", "Bearer " + apiKey}   // 认证：固定前缀 "Bearer " 拼上你的 key
+    };
+    // 发 POST：路径 /chat/completions，带上 headers，body 转成字符串，声明是 JSON
+    auto res = cli.Post("/chat/completions", headers, body.dump(), "application/json");
 
-    // ======================================================================
-    // 空格 2：发 HTTP 请求
-    // 提示（去掉注释符号就是能用的代码骨架，但 ??? 要自己想）：
-    //   httplib::Client cli(baseUrl);              // baseUrl 形如 https://api.deepseek.com
-    //   cli.set_read_timeout(120);                 // LLM 响应慢，超时给足 120 秒
-    //   httplib::Headers headers = {
-    //       {"Authorization", ???}                 // Bearer 认证："Bearer " 拼上 apiKey
-    //   };
-    //   auto res = cli.Post("/chat/completions", headers, body.dump(), "application/json");
-    // ======================================================================
-    // TODO(你来写)：大约 5 行，最后一行必须得到名为 res 的变量
+    // ================== 空格 3：错误处理 ==================
+    if (!res) {                             // res 为空 = 连不上/超时/证书错，网络层就失败了
+        throw std::runtime_error("network error: " + httplib::to_string(res.error()));
+    }
+    if (res->status != 200) {               // 连上了但服务器返回非 200 = key 错/参数错/欠费
+        throw std::runtime_error("http " + std::to_string(res->status) + ": " + res->body);
+    }
 
-
-
-    // ======================================================================
-    // 空格 3：错误处理（先想清楚两种失败的区别再写）
-    //   情况 A：!res → 网络层失败（连不上/超时/证书问题）
-    //           throw std::runtime_error("network error: " + httplib::to_string(res.error()));
-    //   情况 B：res->status != 200 → 服务器拒绝（key 错/参数错/欠费）
-    //           把 res->body 放进异常信息——服务器会告诉你具体原因！
-    // ======================================================================
-    // TODO(你来写)：大约 6 行（两个 if + 两个 throw）
-
-
-
-    // ======================================================================
-    // 空格 4：解析响应，填充 ChatResponse
-    // 响应 JSON 长这样（建议先在空格 3 之后临时加一行
-    //     std::cout << res->body << "\n";  亲眼看一次真实响应再写）：
-    //   { "choices": [ { "message": { "content": "回答文字" },
-    //                    "finish_reason": "stop" } ], ... }
-    // 提示：
-    //   json j = json::parse(res->body);
-    //   j["choices"][0]["message"]["content"].get<std::string>()
-    // ======================================================================
-    ChatResponse out;
-    // TODO(你来写)：大约 4 行
-
-    return out;
+    // ================== 空格 4：解析响应 ==================
+    // 响应形状：{ "choices":[ { "message":{"content":"回答"},
+    //                          "finish_reason":"stop" } ] }
+    json j = json::parse(res->body);        // 把返回的文本解析成 json 对象
+    ChatResponse out;                       // 造一个要返回的结果
+    out.content = j["choices"][0]["message"]["content"].get<std::string>();
+    out.finishReason = j["choices"][0]["finish_reason"].get<std::string>();
+    return out;                             // 交回给调用者
 }
 
 } // namespace miniagent

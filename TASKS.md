@@ -19,36 +19,46 @@
 
 ---
 
-## 🔨 任务 1（M1 第一步）：调通一次 LLM API —— 填空模式
+## ✅ 任务 1（M1）：调通一次 LLM API —— 已完成 🎉
 
-**我已经把整个框架搭好了**，你只需要填 `src/OpenAiProvider.cpp` 里的 **4 个空格**（标了 `TODO(你来写)`）。
-框架现在能编译通过（空格空着时函数返回空结果），所以你可以填一个、编译一次、慢慢来。
+实现了 `OpenAiProvider::chat()`：拼请求 JSON → HTTPS POST（带 Bearer 认证）→ 错误处理 → 解析响应。
+过程中踩平三个 Windows 经典坑，都记下来：
+1. **CMake 中文注释乱码** → MSVC 加 `/utf-8` 编译选项
+2. **`'https' scheme is not supported`** → cpp-httplib 需要链接 OpenSSL 并开 `CPPHTTPLIB_OPENSSL_SUPPORT` 宏（已把 MSVC 版 OpenSSL 放进 `third_party/openssl/`，项目自包含）
+3. **`invalid UTF-8 byte 0xC3`** → 命令行中文参数是 GBK，用 `CommandLineToArgvW` 拿 UTF-16 再转 UTF-8
 
-- **空格 1**：把 `req` 拼成请求 JSON（约 6 行，含一个 for 循环）
-- **空格 2**：用 httplib 发 POST 请求（约 5 行，注释里给了骨架）
-- **空格 3**：错误处理（两个 if + 两个 throw）
-- **空格 4**：解析响应，取出 content 和 finish_reason（约 4 行）
+**核心认知**：调大模型 = 一次带认证的 HTTPS POST。模型的智能在服务器，你的程序只做"拼请求→发→解析"。
 
-每个空格上方的注释写清了：目标、形状、提示代码、大概几行。**强烈建议先填空格 1、2、3，然后在空格 3 后面临时加一行 `std::cout << res->body;` 编译运行，亲眼看看真实响应长什么样，再写空格 4。**
-
-### 编译 & 运行
-```powershell
-cd E:\aicodeing\miniagent
-cmake --build build --config Release
-$env:LLM_API_KEY = "sk-..."     # 你的 key
-.\build\Release\miniagent.exe "用一句话解释什么是TCP"
-```
-
-### 验收标准
-输出模型对问题的真实回答 + `[finish_reason: stop]`。
-
-### 每填完一个空格，或卡住了，就把 OpenAiProvider.cpp 发我，我帮你看。
-不要憋着——填空阶段的目标是"你写出来"，不是"你独自写出来"。
-
-### 完成后思考题（下次我会问）
-1. 为什么 `chat()` 的入参用 `const ChatRequest&` 而不是 `ChatRequest`？
-2. 你的错误处理里，"HTTP 401" 和 "网络超时" 用户看到的信息一样吗？应该一样吗？
+### 完成后思考题（答案）
+1. `const ChatRequest&` 用引用避免拷贝整个消息列表（可能很大），`const` 保证函数不会改动调用者的数据。
+2. 不一样也不该一样：401 是"key 错，去查配置"，超时是"网络问题，重试可能就好"——不同原因要给用户不同的下一步。
 
 ---
 
-（任务 2 预告：给 Provider 加上"工具说明书"字段和 tool_calls 解析——完成任务 1 后解锁。）
+## 🔨 任务 2（M2）：让模型学会调用工具 —— agent 的灵魂
+
+**目标**：给模型一个 `list_dir` 工具（列目录文件），当你问"D盘有什么文件"时，模型请求调用它，你的程序执行并把结果喂回去，模型据此回答。
+
+这是从"聊天机器人"到"agent"的关键一步。分几个小步走，仍然是**我讲你读**的节奏：
+
+- **2.1** 扩展数据结构：`ChatRequest` 加"工具说明书"，`ChatResponse` 加"模型想调的工具"
+- **2.2** 改 `chat()`：请求里带上工具列表，响应里解析出 `tool_calls`
+- **2.3** 写第一个工具 `list_dir`
+- **2.4** 写 Agent Loop：调模型 → 若要调工具则执行 → 结果塞回 → 再调模型，循环到出最终答案
+
+每一步我都会先写代码 + 逐行讲解，你读懂后我们再往下。
+
+### Agent Loop 流程（反复看这张图直到刻进脑子）
+```
+messages = [用户问题]
+loop:
+    resp = chat(messages, 工具列表)
+    如果 resp 没有 tool_calls:  → 打印 resp.content，结束
+    否则:
+        对每个 tool_call:
+            result = 执行对应工具(参数)
+            messages 追加 {role:"tool", 内容:result}
+        继续 loop  ← 带着工具结果再问一次模型
+```
+
+**下一步**：等你说"继续"，我就开始讲 2.1（扩展数据结构）。不急，先把上面这张 Agent Loop 图和任务 1 的三个坑消化一下。
